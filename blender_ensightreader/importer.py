@@ -2,7 +2,7 @@ import mmap
 import re
 from typing import List, Set, Dict
 import numpy as np
-from .ensightreader import read_case, GeometryPart, EnsightVariableFile, VariableLocation, VariableType, EnsightCaseFile
+from .ensightreader import read_case, GeometryPart, EnsightVariableFile, VariableLocation, VariableType
 
 from bpy_extras.io_utils import ImportHelper
 from bpy.props import StringProperty, IntProperty
@@ -56,7 +56,7 @@ class ImportEnsightGold(Operator, ImportHelper):
 
         # ---------------------------------------------------------------------------------
 
-        print("Reading case", path_to_case)
+        self.report({"INFO"}, f"Reading case {path_to_case}")
         case = read_case(path_to_case)
         geofile = case.get_geometry_model(timestep)
 
@@ -64,24 +64,25 @@ class ImportEnsightGold(Operator, ImportHelper):
         for part_id, part in geofile.parts.items():
             part_name = part.part_name
             if parts_exclude_regex.search(part_name):
-                print("Not reading part", part_name, "(parts_exclude_regex matches)")
+                self.report({"INFO"}, f"Not reading part {part_name} (parts_exclude_regex matches)")
             elif not parts_include_regex.search(part_name):
-                print("Not reading part", part_name, "(parts_include_regex does not match)")
+                self.report({"INFO"}, f"Not reading part {part_name} (parts_include_regex does not match)")
             else:
                 if not part.is_surface():
-                    print("Not reading part", part_name, "(no surface elements)")
+                    self.report({"WARNING"}, f"Not reading part {part_name} (no surface elements)")
                 else:
-                    print("Reading part", part_name)
+                    self.report({"INFO"}, f"Reading part {part_name}")
                     parts_to_read.append(part)
 
         variables_to_read: List[EnsightVariableFile] = []
         for variable_name in case.get_variables():
             variable = case.get_variable(variable_name, timestep)
             if variable.variable_location != VariableLocation.PER_NODE:
-                print("Not reading variable", variable_name, "(per-element variables are not supported)")
+                self.report({"WARNING"}, f"Not reading variable {variable_name} (per-element variables are not supported)")
             elif not (variable_name in requested_variables or "*" in requested_variables):
-                print("Not reading variable", variable_name, "(not in requested variables)")
-            variables_to_read.append(variable)
+                self.report({"INFO"}, f"Not reading variable {variable_name} (not in requested variables)")
+            else:
+                variables_to_read.append(variable)
 
         variables_file_dict = {}
         variables_mmap_dict = {}
@@ -94,9 +95,10 @@ class ImportEnsightGold(Operator, ImportHelper):
                     variables_mmap_dict[variable.variable_name] = mmap.mmap(fp.fileno(), 0, access=mmap.ACCESS_READ)
 
                 for part in parts_to_read:
-                    print("Reading part", part.part_name)
+                    self.report({"INFO"}, f"Reading data for part {part.part_name}")
 
-                    obj = convert_ensight_part_to_blender_object(part, variables_to_read, mm_geo, variables_mmap_dict)
+                    obj = self.convert_ensight_part_to_blender_object(part, variables_to_read, mm_geo,
+                                                                      variables_mmap_dict)
                     created_objects.append(obj)
             finally:
                 for mm in variables_mmap_dict.values():
@@ -111,115 +113,118 @@ class ImportEnsightGold(Operator, ImportHelper):
         bpy.ops.object.select_all(action='SELECT')
         bpy.ops.object.delete()
 
-        print("Adding objects to scene")
+        self.report({"INFO"}, f"Adding {len(created_objects)} objects to scene")
         scene = context.scene
 
         # bpy.ops.object.select_all(action='DESELECT')
         for obj in created_objects:
-            print("linking object", obj)
+            self.report({"DEBUG"}, f"linking object {obj}")
             scene.collection.objects.link(obj)
             # obj.select_set(True)
         # context.view_layer.objects.active = created_objects[0]
 
+        self.report({"INFO"}, f"Finished importing EnSight Gold case")
+
         return {'FINISHED'}
 
+    def convert_ensight_part_to_blender_object(self, part: GeometryPart, variables_to_read: List[EnsightVariableFile],
+                                               mm_geo: mmap.mmap, variables_mmap_dict: Dict[str, mmap.mmap]) -> Object:
 
-def convert_ensight_part_to_blender_object(part: GeometryPart, variables_to_read: List[EnsightVariableFile],
-                                           mm_geo: mmap.mmap, variables_mmap_dict: Dict[str, mmap.mmap]) -> Object:
+        # read geometry -----------------------------------------------------------
+        vertices = part.read_nodes(mm_geo).flatten()
 
-    # read geometry -----------------------------------------------------------
-    vertices = part.read_nodes(mm_geo).flatten()
+        vertex_index_ = []
+        loop_start_ = []
+        loop_total_ = []
 
-    vertex_index_ = []
-    loop_start_ = []
-    loop_total_ = []
+        block_loop_start = 0
 
-    block_loop_start = 0
+        for block in part.element_blocks:
+            self.report({"DEBUG"}, f"Element block with {block.number_of_elements} {block.element_type} elements")
+            if block.element_type.dimension != 2:
+                self.report({"DEBUG"}, f"Skipping non-surface element block")
+                continue
 
-    for block in part.element_blocks:
-        if block.element_type.dimension != 2:
-            print("Skipping non-surface elements")
-            continue
+            if block.element_type == block.element_type.NSIDED:
+                polygon_node_counts, polygon_connectivity = block.read_connectivity_nsided(mm_geo)
+            else:
+                connectivity = block.read_connectivity(mm_geo)
+                polygon_node_counts = np.full((connectivity.shape[0],), connectivity.shape[1])
+                polygon_connectivity = connectivity.flatten()
 
-        if block.element_type == block.element_type.NSIDED:
-            polygon_node_counts, polygon_connectivity = block.read_connectivity_nsided(mm_geo)
-        else:
-            connectivity = block.read_connectivity(mm_geo)
-            polygon_node_counts = np.full((connectivity.shape[0],), connectivity.shape[1])
-            polygon_connectivity = connectivity.flatten()
+            vertex_index_.append(polygon_connectivity)
+            tmp = np.cumsum(polygon_node_counts, dtype=np.int32)
+            tmp -= polygon_node_counts
+            tmp += block_loop_start
+            loop_start_.append(tmp)
+            loop_total_.append(polygon_node_counts)
+            block_loop_start += len(polygon_connectivity)
 
-        vertex_index_.append(polygon_connectivity)
-        tmp = np.cumsum(polygon_node_counts, dtype=np.int32)
-        tmp -= polygon_node_counts
-        tmp += block_loop_start
-        loop_start_.append(tmp)
-        loop_total_.append(polygon_node_counts)
-        block_loop_start += len(polygon_connectivity)
+        vertex_index = np.concatenate(vertex_index_).astype(np.int32)
+        vertex_index -= 1  # Blender numbers vertices from 0
+        loop_start = np.concatenate(loop_start_).astype(np.int32)
+        loop_total = np.concatenate(loop_total_).astype(np.int32)
+        num_vertices = vertices.shape[0] // 3
+        num_vertex_indices = vertex_index.shape[0]
+        num_loops = loop_start.shape[0]
 
-    vertex_index = np.concatenate(vertex_index_).astype(np.int32)
-    vertex_index -= 1  # Blender numbers vertices from 0
-    loop_start = np.concatenate(loop_start_).astype(np.int32)
-    loop_total = np.concatenate(loop_total_).astype(np.int32)
-    num_vertices = vertices.shape[0] // 3
-    num_vertex_indices = vertex_index.shape[0]
-    num_loops = loop_start.shape[0]
+        # construct Blender mesh --------------------------------------------------
 
-    # construct Blender mesh --------------------------------------------------
+        # print("bpy.data.meshes.new", part.part_name, "- num_vertices", num_vertices, "num_loops", num_loops)
+        mesh = bpy.data.meshes.new(name=part.part_name)
 
-    # print("bpy.data.meshes.new", part.part_name, "- num_vertices", num_vertices, "num_loops", num_loops)
-    mesh = bpy.data.meshes.new(name=part.part_name)
+        mesh.vertices.add(num_vertices)
+        mesh.vertices.foreach_set("co", vertices)
 
-    mesh.vertices.add(num_vertices)
-    mesh.vertices.foreach_set("co", vertices)
+        mesh.loops.add(num_vertex_indices)
+        mesh.loops.foreach_set("vertex_index", vertex_index)
 
-    mesh.loops.add(num_vertex_indices)
-    mesh.loops.foreach_set("vertex_index", vertex_index)
+        mesh.polygons.add(num_loops)
+        mesh.polygons.foreach_set("loop_start", loop_start)
+        mesh.polygons.foreach_set("loop_total", loop_total)
 
-    mesh.polygons.add(num_loops)
-    mesh.polygons.foreach_set("loop_start", loop_start)
-    mesh.polygons.foreach_set("loop_total", loop_total)
+        mesh.update()
+        mesh.validate()
 
-    mesh.update()
-    mesh.validate()
+        # print("After update and validate - num_vertices", len(mesh.vertices), "num_loops", len(mesh.loops))
 
-    # print("After update and validate - num_vertices", len(mesh.vertices), "num_loops", len(mesh.loops))
+        # construct Blender object ------------------------------------------------
 
-    # construct Blender object ------------------------------------------------
+        obj = bpy.data.objects.new(part.part_name, mesh)
 
-    obj = bpy.data.objects.new(part.part_name, mesh)
+        # read variable data-------------------------------------------------------
 
-    # read variable data-------------------------------------------------------
+        for variable in variables_to_read:
+            variable_name = variable.variable_name
+            if not variable.is_defined_for_part_id(part.part_id):
+                self.report({"INFO"}, f"Skipping variable {variable_name} (not defined for this part)")
+                continue
 
-    for variable in variables_to_read:
-        variable_name = variable.variable_name
-        if not variable.is_defined_for_part_id(part.part_id):
-            print("Skipping undefined variable", variable_name)
-            continue
+            if variable.variable_type == VariableType.SCALAR:
+                blender_type = "FLOAT"
+                blender_attribute_set = "value"
+            elif variable.variable_type == VariableType.VECTOR:
+                blender_type = "FLOAT_VECTOR"
+                blender_attribute_set = "vector"
+            else:
+                self.report({"WARNING"}, f"Skipping variable {variable_name} (unsupported variable type)")
+                continue
 
-        if variable.variable_type == VariableType.SCALAR:
-            blender_type = "FLOAT"
-            blender_attribute_set = "value"
-        elif variable.variable_type == VariableType.VECTOR:
-            blender_type = "FLOAT_VECTOR"
-            blender_attribute_set = "vector"
-        else:
-            print("Skipping unsupported variable type", variable_name)
-            continue
+            if variable.variable_location != VariableLocation.PER_NODE:
+                # TODO It would be nice to support per-element variables as well, but I've encountered problems
+                #      when implementing this - Blender seems to do some processing of faces when calling
+                #      mesh.update() and mesh.validate(), such that number of faces does not match input.
+                self.report({"WARNING"}, f"Skipping variable {variable_name} (per-element variables are not supported)")
+                continue
 
-        if variable.variable_location != VariableLocation.PER_NODE:
-            print("Skipping unsupported variable location", variable_name)
-            continue
+            self.report({"DEBUG"}, f"Reading variable {variable_name}")
+            mm = variables_mmap_dict[variable_name]
+            variable_data = variable.read_node_data(mm, part.part_id).flatten()
+            blender_domain = "POINT"
 
-        print("Reading variable", variable_name)
-        mm = variables_mmap_dict[variable_name]
-        variable_data = variable.read_node_data(mm, part.part_id).flatten()
-        blender_domain = "POINT"
+            attr = obj.data.attributes.new(variable_name, blender_type, blender_domain)
+            attr.data.foreach_set(blender_attribute_set, variable_data)
 
-        # print("obj.data.attributes.new", variable_name, blender_type, blender_domain)
-        attr = obj.data.attributes.new(variable_name, blender_type, blender_domain)
-        # print("attr.data.foreach_set", blender_attribute_set, variable_data, variable_data.shape, variable_data.dtype)
-        attr.data.foreach_set(blender_attribute_set, variable_data)
+        obj.data.update()  # finishes reading attribute data
 
-    obj.data.update()  # finishes reading attribute data
-
-    return obj
+        return obj
