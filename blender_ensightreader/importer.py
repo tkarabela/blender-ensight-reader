@@ -96,8 +96,7 @@ class ImportEnsightGold(Operator, ImportHelper):
                 for part in parts_to_read:
                     print("Reading part", part.part_name)
 
-                    obj = convert_ensight_part_to_blender_object(case, part, variables_to_read, mm_geo,
-                                                                 variables_mmap_dict)
+                    obj = convert_ensight_part_to_blender_object(part, variables_to_read, mm_geo, variables_mmap_dict)
                     created_objects.append(obj)
             finally:
                 for mm in variables_mmap_dict.values():
@@ -125,8 +124,7 @@ class ImportEnsightGold(Operator, ImportHelper):
         return {'FINISHED'}
 
 
-def convert_ensight_part_to_blender_object(case: EnsightCaseFile, part: GeometryPart,
-                                           variables_to_read: List[EnsightVariableFile],
+def convert_ensight_part_to_blender_object(part: GeometryPart, variables_to_read: List[EnsightVariableFile],
                                            mm_geo: mmap.mmap, variables_mmap_dict: Dict[str, mmap.mmap]) -> Object:
 
     # read geometry -----------------------------------------------------------
@@ -151,9 +149,12 @@ def convert_ensight_part_to_blender_object(case: EnsightCaseFile, part: Geometry
             polygon_connectivity = connectivity.flatten()
 
         vertex_index_.append(polygon_connectivity)
-        loop_start_.append(np.cumsum(polygon_node_counts, dtype=np.int32) - polygon_node_counts[0] + block_loop_start)
+        tmp = np.cumsum(polygon_node_counts, dtype=np.int32)
+        tmp -= polygon_node_counts
+        tmp += block_loop_start
+        loop_start_.append(tmp)
         loop_total_.append(polygon_node_counts)
-        block_loop_start += block.number_of_elements
+        block_loop_start += len(polygon_connectivity)
 
     vertex_index = np.concatenate(vertex_index_).astype(np.int32)
     vertex_index -= 1  # Blender numbers vertices from 0
