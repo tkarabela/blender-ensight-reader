@@ -108,20 +108,15 @@ class ImportEnsightGold(Operator, ImportHelper):
 
         # ---------------------------------------------------------------------------------
 
-        # XXX is this needed and why???
-        # Note: we DELETE all objects in the scene and only then create the new mesh!
-        bpy.ops.object.select_all(action='SELECT')
-        bpy.ops.object.delete()
-
         self.report({"INFO"}, f"Adding {len(created_objects)} objects to scene")
         scene = context.scene
 
-        # bpy.ops.object.select_all(action='DESELECT')
+        bpy.ops.object.select_all(action='DESELECT')
         for obj in created_objects:
             self.report({"DEBUG"}, f"linking object {obj}")
             scene.collection.objects.link(obj)
-            # obj.select_set(True)
-        # context.view_layer.objects.active = created_objects[0]
+            obj.select_set(True)
+        context.view_layer.objects.active = created_objects[0]
 
         self.report({"INFO"}, f"Finished importing EnSight Gold case")
 
@@ -129,8 +124,13 @@ class ImportEnsightGold(Operator, ImportHelper):
 
     def convert_ensight_part_to_blender_object(self, part: GeometryPart, variables_to_read: List[EnsightVariableFile],
                                                mm_geo: mmap.mmap, variables_mmap_dict: Dict[str, mmap.mmap]) -> Object:
+        # -------------------------------------------------------------------------
+        # Read geometry
+        # - create Blender mesh object and import geometry data using NumPy arrays
+        # - adapted from code example by Paul Melis on devtalk.blender.org:
+        #   https://devtalk.blender.org/t/alternative-in-2-80-to-create-meshes-from-python-using-the-tessfaces-api/7445
+        # -------------------------------------------------------------------------
 
-        # read geometry -----------------------------------------------------------
         vertices = part.read_nodes(mm_geo).flatten()
 
         vertex_index_ = []
@@ -168,9 +168,6 @@ class ImportEnsightGold(Operator, ImportHelper):
         num_vertex_indices = vertex_index.shape[0]
         num_loops = loop_start.shape[0]
 
-        # construct Blender mesh --------------------------------------------------
-
-        # print("bpy.data.meshes.new", part.part_name, "- num_vertices", num_vertices, "num_loops", num_loops)
         mesh = bpy.data.meshes.new(name=part.part_name)
 
         mesh.vertices.add(num_vertices)
@@ -186,13 +183,12 @@ class ImportEnsightGold(Operator, ImportHelper):
         mesh.update()
         mesh.validate()
 
-        # print("After update and validate - num_vertices", len(mesh.vertices), "num_loops", len(mesh.loops))
-
-        # construct Blender object ------------------------------------------------
-
         obj = bpy.data.objects.new(part.part_name, mesh)
 
-        # read variable data-------------------------------------------------------
+        # -------------------------------------------------------------------------
+        # Read variable data
+        # - attach per-node variables from EnSight case as scalar/vector attributes
+        # -------------------------------------------------------------------------
 
         for variable in variables_to_read:
             variable_name = variable.variable_name
@@ -207,6 +203,8 @@ class ImportEnsightGold(Operator, ImportHelper):
                 blender_type = "FLOAT_VECTOR"
                 blender_attribute_set = "vector"
             else:
+                # TODO We could support tensor or complex variables, perhaps by creating multiple scalar
+                #      attributes from them?
                 self.report({"WARNING"}, f"Skipping variable {variable_name} (unsupported variable type)")
                 continue
 
