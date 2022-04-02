@@ -9,5 +9,5 @@ For development, we just re-export the real `ensightreader` module here.
 """
 
 import sys, os.path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../ensight-reader"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "../ensight-reader"))
 from ensightreader import *

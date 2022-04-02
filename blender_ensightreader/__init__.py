@@ -39,4 +39,4 @@ if __name__ == "__main__":
     register()
 
     # test call
-    bpy.ops.import_test.some_data('INVOKE_DEFAULT')
+    bpy.ops.blender_ensightreader.import_ensight_gold('INVOKE_DEFAULT')
