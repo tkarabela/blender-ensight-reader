@@ -58,3 +58,14 @@ The dialog has several options to specify the data you want to load:
   based on other time steps in the original case)
 - for more technical details, see [documentation of `ensight-reader`](https://ensight-reader.readthedocs.io/en/latest/api-reference.html#ensightreader.EnsightCaseFile),
   the library used by this add-on
+
+### Other visualization add-ons for Blender
+
+- [**BVTKNodes**](https://bvtknodes.readthedocs.io/en/latest/BVTKNodes.html) is a complex add-on bringing
+  data pipelines from the VTK library into Blender, giving it many capabilities of Paraview. It can read EnSight Gold
+  cases through the VTK library (selective reading of parts is not supported as of VTK 9.0).
+- [**COVISE nodes for Blender**](https://blender.it4i.cz/scientific-visualization/covise/) is another complex add-on
+  for scientific visualization, based on COVISE library rather than VTK.
+- [**io_mesh_vtk**](https://github.com/tkeskita/io_mesh_vtk) is a simple add-on for reading and writing the VTK legacy
+  text format (only polydata).
+- [**BlenderDataVis**](https://github.com/Griperis/BlenderDataVis/) is an add-on for creating animated charts in Blender.
