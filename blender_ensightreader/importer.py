@@ -24,9 +24,10 @@ import re
 from typing import List, Set, Dict
 import numpy as np
 from .ensightreader import read_case, GeometryPart, EnsightVariableFile, VariableLocation, VariableType
+from .material import create_new_material, setup_ensight_material_node_tree
 
 from bpy_extras.io_utils import ImportHelper
-from bpy.props import StringProperty, IntProperty
+from bpy.props import StringProperty, IntProperty, BoolProperty
 from bpy.types import Operator, Object
 import bpy
 
@@ -67,6 +68,13 @@ class ImportEnsightGold(Operator, ImportHelper):
         description="Regular expression for part names that should *not* be loaded;"
                     " takes priority over parts_include_regex; use '' to not exclude any",
         default="internalMesh")
+
+    create_material: BoolProperty(
+        name="Create material",
+        description="If checked, imported objects will be given a new material with node setup"
+                    " for coloring by variable",
+        default=True
+    )
 
     def execute(self, context) -> Set[str]:
         timestep = self.timestep
@@ -138,6 +146,21 @@ class ImportEnsightGold(Operator, ImportHelper):
             scene.collection.objects.link(obj)
             obj.select_set(True)
         context.view_layer.objects.active = created_objects[0]
+
+        if self.create_material:
+            self.report({"INFO"}, f"Creating EnSight material")
+            mat = create_new_material("EnSightMaterial")
+            default_variable = variables_to_read[0] if variables_to_read else None
+            if default_variable:
+                setup_ensight_material_node_tree(
+                    mat,
+                    default_attribute_name=default_variable.variable_name,
+                    default_attribute_is_vector=default_variable.variable_type == VariableType.VECTOR)
+            else:
+                setup_ensight_material_node_tree(mat)
+
+            for obj in created_objects:
+                obj.data.materials.append(mat)
 
         self.report({"INFO"}, f"Finished importing EnSight Gold case")
 
