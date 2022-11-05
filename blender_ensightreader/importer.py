@@ -23,7 +23,7 @@ import mmap
 import re
 from typing import List, Set, Dict
 import numpy as np
-from .ensightreader import read_case, GeometryPart, EnsightVariableFile, VariableLocation, VariableType
+from .ensightreader import read_case, GeometryPart, EnsightVariableFile, VariableLocation, VariableType, ElementType
 from .material import create_new_material, setup_ensight_material_node_tree
 
 from bpy_extras.io_utils import ImportHelper
@@ -97,8 +97,8 @@ class ImportEnsightGold(Operator, ImportHelper):
             elif not parts_include_regex.search(part_name):
                 self.report({"INFO"}, f"Not reading part {part_name} (parts_include_regex does not match)")
             else:
-                if not part.is_surface():
-                    self.report({"WARNING"}, f"Not reading part {part_name} (no surface elements)")
+                if part.is_volume():
+                    self.report({"WARNING"}, f"Not reading part {part_name} (has volume elements)")
                 else:
                     self.report({"INFO"}, f"Reading part {part_name}")
                     parts_to_read.append(part)
@@ -117,7 +117,7 @@ class ImportEnsightGold(Operator, ImportHelper):
         variables_mmap_dict = {}
         created_objects: List[Object] = []
 
-        with open(geofile.file_path, "rb") as fp_geo, mmap.mmap(fp_geo.fileno(), 0, access=mmap.ACCESS_READ) as mm_geo:
+        with geofile.mmap() as mm_geo:
             try:
                 for variable in variables_to_read:
                     variables_file_dict[variable.variable_name] = fp = open(variable.file_path, "rb")
@@ -189,8 +189,12 @@ class ImportEnsightGold(Operator, ImportHelper):
 
         for block in part.element_blocks:
             self.report({"DEBUG"}, f"Element block with {block.number_of_elements} {block.element_type} elements")
-            if block.element_type.dimension != 2:
-                self.report({"DEBUG"}, f"Skipping non-surface element block")
+            if block.element_type == ElementType.BAR3:
+                # TODO support BAR3 elements - we need to split them into two line segments to avoid getting TRIA3
+                self.report({"WARNING"}, f"Skipping {block.element_type.value} element block - please use BAR2 instead")
+                continue
+            if block.element_type.dimension not in (1, 2):
+                self.report({"DEBUG"}, f"Skipping {block.element_type.value} element block - unsupported dimension")
                 continue
 
             if block.element_type == block.element_type.NSIDED:
@@ -208,10 +212,18 @@ class ImportEnsightGold(Operator, ImportHelper):
             loop_total_.append(polygon_node_counts)
             block_loop_start += len(polygon_connectivity)
 
-        vertex_index = np.concatenate(vertex_index_).astype(np.int32)
-        vertex_index -= 1  # Blender numbers vertices from 0
-        loop_start = np.concatenate(loop_start_).astype(np.int32)
-        loop_total = np.concatenate(loop_total_).astype(np.int32)
+        have_cells = len(vertex_index_) > 0
+
+        if have_cells:
+            vertex_index = np.concatenate(vertex_index_).astype(np.int32)
+            vertex_index -= 1  # Blender numbers vertices from 0
+            loop_start = np.concatenate(loop_start_).astype(np.int32)
+            loop_total = np.concatenate(loop_total_).astype(np.int32)
+        else:
+            vertex_index = np.ndarray((0,), dtype=np.int32)
+            loop_start = np.ndarray((0,), dtype=np.int32)
+            loop_total = np.ndarray((0,), dtype=np.int32)
+
         num_vertices = vertices.shape[0] // 3
         num_vertex_indices = vertex_index.shape[0]
         num_loops = loop_start.shape[0]
@@ -221,12 +233,13 @@ class ImportEnsightGold(Operator, ImportHelper):
         mesh.vertices.add(num_vertices)
         mesh.vertices.foreach_set("co", vertices)
 
-        mesh.loops.add(num_vertex_indices)
-        mesh.loops.foreach_set("vertex_index", vertex_index)
+        if have_cells:
+            mesh.loops.add(num_vertex_indices)
+            mesh.loops.foreach_set("vertex_index", vertex_index)
 
-        mesh.polygons.add(num_loops)
-        mesh.polygons.foreach_set("loop_start", loop_start)
-        mesh.polygons.foreach_set("loop_total", loop_total)
+            mesh.polygons.add(num_loops)
+            mesh.polygons.foreach_set("loop_start", loop_start)
+            mesh.polygons.foreach_set("loop_total", loop_total)
 
         mesh.update()
         mesh.validate()
