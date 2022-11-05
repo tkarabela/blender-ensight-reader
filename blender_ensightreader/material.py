@@ -122,8 +122,8 @@ def setup_ensight_material_node_tree(mat,
     vector_math_AB_node.operation = "SUBTRACT"
     vector_math_AB_node.location = 200, -550
     vector_math_AB_node.hide = True
-    links.new(vector_transform_B_node.outputs[0], vector_math_AB_node.inputs[0])
-    links.new(vector_transform_A_node.outputs[0], vector_math_AB_node.inputs[1])
+    links.new(vector_transform_A_node.outputs[0], vector_math_AB_node.inputs[0])
+    links.new(vector_transform_B_node.outputs[0], vector_math_AB_node.inputs[1])
 
     separate_AB_node = nodes.new("ShaderNodeSeparateXYZ")
     separate_AB_node.hide = True
