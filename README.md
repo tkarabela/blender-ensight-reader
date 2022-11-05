@@ -6,7 +6,7 @@ for scientific or engineering visualization.
 
 ### Features
 
-- It's minimal - works with Blender 2.93+ (no extra dependencies
+- It's minimal - works with Blender 3.1+ (no extra dependencies
   or special builds needed)
 - It's fast - import only parts/variables you need
 - It's native - parts are loaded as objects, variables are loaded
@@ -21,7 +21,7 @@ and imported into Blender 3.1.*
 
 1. Download the plug-in ZIP from [GitHub releases page](https://github.com/tkarabela/blender-ensight-reader/releases/)
 2. In Blender, go to menu `Edit > Preferences > Add-ons > Install`
-   and point it to the ZIP file you downloaded (eg. `blender-ensight-reader-1.0.0.zip`)
+   and point it to the ZIP file you downloaded (eg. `blender-ensight-reader-1.1.0.zip`)
 3. Enable the add-on by clicking the checkbox next to it.
 
 ### Usage
@@ -47,12 +47,28 @@ The dialog has several options to specify the data you want to load:
       over "Parts to include". To load all parts, leave the field empty.</dd>
 </dl>
 
+After the import is finished, the plugin also creates a material called **EnSightMaterial**
+which you can use as a starting point for your visualization:
+
+- select which attribute you want to color the part with (for vectors, you can use magnitude or X/Y/Z component)
+- define range of your palette
+- use default blue-to-red rainbow palette or make your own
+
+![EnSightMaterial shader for coloring the geometry](images/blender-ensight-material.png)
+
+The material includes node setup for generating screen-space vectors which can be exported as OpenEXR layers
+and then used to add **Line Integral Convolution (LIC)** as a compositing effect in Natron or DaVinci Resolve
+using [openfx-lic](https://github.com/tkarabela/openfx-lic).
+
+![Shader setup for outputting screen-space vectors for LIC](images/blender-ensight-material-lic.png)
+
 ### Current limitations
 
 - only "scalar per node" and "vector per node" variables are supported
 - only "C Binary" EnSight Gold files with unstructured grids are supported
-- only 2D elements are imported (Blender has no concept of unstructured grid
-  with 3D elements; points and lines are untested)
+- only 2D elements and 1D `bar2` elements are supported (Blender has no concept
+  of unstructured 3D cells; point clouds can be imported from parts with no
+  elements or with 0D `point` elements)
 - there is no concept of time beyond importing data for a particular time step
   (once the objects are created, you cannot animate the variable data or geometry
   based on other time steps in the original case)
