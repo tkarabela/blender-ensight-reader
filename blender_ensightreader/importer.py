@@ -145,7 +145,11 @@ class ImportEnsightGold(Operator, ImportHelper):
             self.report({"DEBUG"}, f"linking object {obj}")
             scene.collection.objects.link(obj)
             obj.select_set(True)
-        context.view_layer.objects.active = created_objects[0]
+
+        if created_objects:
+            context.view_layer.objects.active = created_objects[0]
+        else:
+            self.report({"WARNING"}, f"No objects were created")
 
         if self.create_material:
             self.report({"INFO"}, f"Creating EnSight material")
