@@ -32,7 +32,7 @@ bl_info = {
     "author": "Tomas Karabela",
     "description": "Imports surface geometry from EnSight Gold case.",
     "version": (1, 1, 0),
-    "blender": (2, 93, 0),
+    "blender": (3, 1, 0),
     "location": "File > Import > EnSight Gold",
     "url": "https://github.com/tkarabela/ensight-reader",
     "wiki_url": "https://github.com/tkarabela/ensight-reader",
